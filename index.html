@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cue Sheet — schedule watcher</title>
 <meta name="description" content="Paste a time-stamped schedule, arm the watch, and get a ding plus an on-screen heads-up a few minutes before each cue.">
+<link rel="icon" id="favicon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjI4IiBmaWxsPSIjM0Q0RUE4Ii8+PGxpbmUgeDE9IjE4IiB5MT0iNTAiIHgyPSI4MiIgeTI9IjUwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMTIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjEyIiBmaWxsPSIjREE1NDM5Ii8+PC9zdmc+">
 <script>
   // Set the theme before first paint so there's no flash of the wrong palette.
   (function(){
@@ -365,17 +366,19 @@
   // Notification icon: the Cue Sheet mark (a line with a centered cue dot) drawn to
   // a PNG data URI so it works on the plain Notification constructor with no service
   // worker. Painted from a fixed brand palette per theme (not the PALETTE_* arrays);
-  // PNG (not SVG) for Safari/Chrome reliability. Rendered at 192px so it stays crisp
-  // when the OS downscales it. Coords are a 0-100 design space scaled by s to 192px.
+  // PNG (not SVG) for Safari/Chrome reliability. Rendered at the requested size
+  // (192px for notifications, 64px for the favicon); the OS/tab downscales it.
+  // Coords are a 0-100 design space scaled by s to the bitmap.
   var cueIconCache = {};
-  function cueIconDataURL(){
-    var key = isDarkTheme() ? "dark" : "light";
+  function cueIconDataURL(size){
+    size = size || 192;
+    var dark = isDarkTheme(), key = (dark ? "dark" : "light") + ":" + size;
     if (cueIconCache[key]) return cueIconCache[key];
     try{
-      var c = key === "dark"
+      var c = dark
         ? { tile:"#8E9AEA", line:"#15171B", dot:"#E76A50", halo:"#15171B", haloW:1.5 }
         : { tile:"#3D4EA8", line:"#FFFFFF", dot:"#DA5439", halo:"#F1F3FD", haloW:2 };
-      var size = 192, s = size / 100, cv = document.createElement("canvas");
+      var s = size / 100, cv = document.createElement("canvas");
       cv.width = size; cv.height = size;
       var ctx = cv.getContext("2d"), r = 28 * s;
       // Rounded-square tile. The final arcTo lands back on the start point, so
@@ -400,6 +403,16 @@
       cueIconCache[key] = url;
       return url;
     }catch(e){ return undefined; }
+  }
+
+  // Keep the browser-tab favicon in sync with the in-app theme. It's declared
+  // statically in <head> (inline SVG) so it never 404s to the site root; here we
+  // upgrade it to the canvas-rendered mark for the active theme.
+  function updateFavicon(){
+    var link = document.getElementById("favicon");
+    if (!link) return;
+    var url = cueIconDataURL(64);
+    if (url) link.href = url;
   }
 
   function escapeHtml(s){
@@ -549,6 +562,7 @@
       b.tabIndex = on ? 0 : -1; // roving tabindex: the group is a single Tab stop
     });
     if (persist) lsSet(LS.theme, next);
+    updateFavicon();
     if (entries.length) render(); // re-resolve dot colours for the new palette
   }
   function onThemeKeydown(e){
@@ -1069,7 +1083,7 @@
   });
   if (window.matchMedia){
     var mq = window.matchMedia("(prefers-color-scheme: dark)");
-    var onScheme = function(){ if (theme === "auto" && entries.length) render(); };
+    var onScheme = function(){ updateFavicon(); if (theme === "auto" && entries.length) render(); };
     if (mq.addEventListener) mq.addEventListener("change", onScheme);
     else if (mq.addListener) mq.addListener(onScheme);
   }
