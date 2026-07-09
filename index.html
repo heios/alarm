@@ -362,6 +362,46 @@
   }
   function currentPalette(){ return isDarkTheme() ? PALETTE_DARK : PALETTE_LIGHT; }
 
+  // Notification icon: the Cue Sheet mark (a line with a centered cue dot) drawn to
+  // a PNG data URI so it works on the plain Notification constructor with no service
+  // worker. Painted from a fixed brand palette per theme (not the PALETTE_* arrays);
+  // PNG (not SVG) for Safari/Chrome reliability. Rendered at 192px so it stays crisp
+  // when the OS downscales it. Coords are a 0-100 design space scaled by s to 192px.
+  var cueIconCache = {};
+  function cueIconDataURL(){
+    var key = isDarkTheme() ? "dark" : "light";
+    if (cueIconCache[key]) return cueIconCache[key];
+    try{
+      var c = key === "dark"
+        ? { tile:"#8E9AEA", line:"#15171B", dot:"#E76A50", halo:"#15171B", haloW:1.5 }
+        : { tile:"#3D4EA8", line:"#FFFFFF", dot:"#DA5439", halo:"#F1F3FD", haloW:2 };
+      var size = 192, s = size / 100, cv = document.createElement("canvas");
+      cv.width = size; cv.height = size;
+      var ctx = cv.getContext("2d"), r = 28 * s;
+      // Rounded-square tile. The final arcTo lands back on the start point, so
+      // closePath() just seals it - the moveTo/closePath pairing is intentional.
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.arcTo(size, 0, size, size, r);
+      ctx.arcTo(size, size, 0, size, r);
+      ctx.arcTo(0, size, 0, 0, r);
+      ctx.arcTo(0, 0, size, 0, r);
+      ctx.closePath();
+      ctx.fillStyle = c.tile; ctx.fill();
+      ctx.lineCap = "round";
+      ctx.strokeStyle = c.line; ctx.lineWidth = 12 * s;
+      ctx.beginPath();
+      ctx.moveTo(18 * s, 50 * s); ctx.lineTo(82 * s, 50 * s); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(50 * s, 50 * s, 12 * s, 0, 2 * Math.PI);
+      ctx.fillStyle = c.dot; ctx.fill();
+      ctx.lineWidth = c.haloW * s; ctx.strokeStyle = c.halo; ctx.stroke();
+      var url = cv.toDataURL("image/png");
+      cueIconCache[key] = url;
+      return url;
+    }catch(e){ return undefined; }
+  }
+
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
@@ -641,7 +681,8 @@
       var when = mins === 0 ? "now" : "in " + mins + " min";
       new Notification("Cue Sheet — " + when + " · " + formatWhen(b.ts), {
         body: b.items.map(function(i){ return i.message; }).join("\n"),
-        tag: "cuesheet-" + b.ts
+        tag: "cuesheet-" + b.ts,
+        icon: cueIconDataURL()
       });
     }catch(e){}
   }
