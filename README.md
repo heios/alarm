@@ -31,13 +31,11 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 
 ## Deploy to GitHub Pages
 
-Published as a **project site** at `https://heios.github.io/alarm/` — so the GitHub repo is named **`alarm`**.
+Published as a **project site** at `https://heios.github.io/alarm/` (the repo is named **`alarm`**). A project site coexists with the `heios.github.io` user site — GitHub serves this repo at the `/alarm/` subpath without any change to the user site.
 
-**Option A — GitHub Actions (included).** Push to `main`. In the repo's **Settings → Pages**, set **Source: GitHub Actions**. The bundled workflow at [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) publishes the repo root on every push.
+**Source: Deploy from a branch.** In the repo's **Settings → Pages**, set **Source: Deploy from a branch**, branch `main`, folder `/ (root)`. The [`.nojekyll`](.nojekyll) marker tells Pages to serve the files verbatim (no Jekyll build), and every push to `main` re-publishes.
 
-**Option B — deploy from a branch.** In **Settings → Pages**, set **Source: Deploy from a branch**, branch `main`, folder `/ (root)`. The included [`.nojekyll`](.nojekyll) tells Pages to serve the files as-is.
-
-Either way the entry point is `index.html` at the repo root, so it works unchanged from the `/alarm/` subpath — all assets are inlined and every path is relative.
+The entry point is `index.html` at the repo root; all assets are inlined and every path is relative, so it works unchanged from the `/alarm/` subpath.
 
 ## Privacy
 
