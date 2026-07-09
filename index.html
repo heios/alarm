@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Sheet — schedule watcher</title>
+<meta name="description" content="Paste a time-stamped schedule, arm the watch, and get a ding plus an on-screen heads-up a few minutes before each cue.">
+<script>
+  // Set the theme before first paint so there's no flash of the wrong palette.
+  (function(){
+    try{
+      var t = localStorage.getItem("cuesheet.theme") || "auto";
+      document.documentElement.setAttribute("data-theme", t);
+    }catch(e){}
+  })();
+</script>
+<style>
+  :root{
+    --paper:#F6F7F5; --panel:#FFFFFF;
+    --ink:#181B19; --ink-soft:#4B514C; --ink-faint:#6B706B;
+    --rail:#E4E7E2; --rail-strong:#CBD0C7;
+    --accent:#3D4EA8; --accent-soft:#E7EAF9; --accent-fg:#FFFFFF;
+    --on-fill:#3FA65C; --on-wash:#CFEED9;
+    --paused-wash:#D6DAD3;
+    --hatch-a:#E7EAE2; --hatch-b:#CDD2C6;
+    --future-wash:#FBFCFB;
+    --marker-idle:#9AA09A;
+    --danger:#B4432E; --danger-soft:#F6E4DF;
+    --primary-bg:#181B19; --primary-fg:#F6F7F5; --primary-hover:#000000;
+    --live-fg:#1F6B36;
+    --tip-bg:#181B19; --tip-fg:#F6F7F5; --tip-accent:#9BE0AE; --tip-shadow:rgba(20,22,25,0.22);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  :root[data-theme="dark"]{
+    --paper:#131519; --panel:#1B1E24;
+    --ink:#E9EBE6; --ink-soft:#A4A9A2; --ink-faint:#949A92;
+    --rail:#292D34; --rail-strong:#3A3F48;
+    --accent:#8E9AEA; --accent-soft:#23273D; --accent-fg:#15171B;
+    --on-fill:#4FB86C; --on-wash:#1C3626;
+    --paused-wash:#31353D;
+    --hatch-a:#232730; --hatch-b:#2E323A;
+    --future-wash:#101318;
+    --marker-idle:#7E847C;
+    --danger:#E76A50; --danger-soft:#3A211B;
+    --primary-bg:#E9EBE6; --primary-fg:#15171B; --primary-hover:#FFFFFF;
+    --live-fg:#7FE0A0;
+    --tip-bg:#23272E; --tip-fg:#E9EBE6; --tip-accent:#7FE0A0; --tip-shadow:rgba(0,0,0,0.45);
+  }
+  @media (prefers-color-scheme: dark){
+    :root[data-theme="auto"]{
+      --paper:#131519; --panel:#1B1E24;
+      --ink:#E9EBE6; --ink-soft:#A4A9A2; --ink-faint:#949A92;
+      --rail:#292D34; --rail-strong:#3A3F48;
+      --accent:#8E9AEA; --accent-soft:#23273D; --accent-fg:#15171B;
+      --on-fill:#4FB86C; --on-wash:#1C3626;
+      --paused-wash:#272A31;
+      --hatch-a:#1E2127; --hatch-b:#2A2E35;
+      --future-wash:#171A1F;
+      --danger:#E76A50; --danger-soft:#3A211B;
+      --primary-bg:#E9EBE6; --primary-fg:#15171B; --primary-hover:#FFFFFF;
+      --live-fg:#7FE0A0;
+      --tip-bg:#23272E; --tip-fg:#E9EBE6; --tip-accent:#7FE0A0; --tip-shadow:rgba(0,0,0,0.45);
+    }
+  }
+
+  *{box-sizing:border-box;}
+  [hidden]{display:none !important;}
+  html{color-scheme:light dark;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);}
+  .app{max-width:940px;margin:0 auto;padding:2rem 1.5rem 4rem;}
+
+  /* ---------- top bar ---------- */
+  .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:1.5rem;flex-wrap:wrap;margin-bottom:1.6rem;}
+  .brand__title{font-family:var(--mono);font-size:1.7rem;font-weight:700;margin:0;letter-spacing:-0.01em;}
+  .brand__tag{color:var(--ink-soft);margin:0.25rem 0 0;font-size:0.9rem;max-width:46ch;line-height:1.45;}
+  .settings{display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap;}
+
+  .field{display:flex;flex-direction:column;gap:0.35rem;}
+  .field__label{font-family:var(--mono);font-size:0.66rem;letter-spacing:0.09em;text-transform:uppercase;color:var(--ink-faint);}
+  .field__control{display:flex;align-items:center;gap:0.45rem;background:var(--panel);border:1px solid var(--rail-strong);border-radius:6px;padding:0.35rem 0.6rem;cursor:text;}
+  .field__control:focus-within{outline:2px solid var(--accent);outline-offset:1px;}
+  .field__input{width:2.6rem;border:none;background:transparent;color:var(--ink);font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.95rem;font-weight:600;text-align:right;padding:0;-moz-appearance:textfield;}
+  .field__input:focus{outline:none;}
+  .field__input::-webkit-outer-spin-button,.field__input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .field__suffix{font-size:0.82rem;color:var(--ink-soft);white-space:nowrap;}
+
+  .theme{display:inline-flex;background:var(--panel);border:1px solid var(--rail-strong);border-radius:6px;padding:2px;gap:2px;}
+  .theme__btn{font-family:var(--sans);font-size:0.78rem;font-weight:600;color:var(--ink-soft);background:transparent;border:none;border-radius:4px;padding:0.4rem 0.7rem;cursor:pointer;display:inline-flex;align-items:center;gap:0.35rem;transition:background 0.12s ease,color 0.12s ease;}
+  .theme__btn:hover{color:var(--ink);}
+  .theme__btn[aria-checked="true"]{background:var(--accent);color:var(--accent-fg);}
+  .theme__btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .theme__ico{width:14px;height:14px;display:inline-block;}
+
+  .notify-btn{font-family:var(--sans);font-size:0.82rem;font-weight:600;color:var(--ink-soft);background:var(--panel);border:1px solid var(--rail-strong);border-radius:6px;padding:0.45rem 0.75rem;cursor:pointer;display:inline-flex;align-items:center;gap:0.45rem;transition:background 0.12s ease,color 0.12s ease,border-color 0.12s ease;}
+  .notify-btn:hover:not(:disabled){color:var(--ink);border-color:var(--ink-soft);}
+  .notify-btn[aria-pressed="true"]{background:var(--on-fill);color:#FFFFFF;border-color:var(--on-fill);}
+  .notify-btn:disabled{opacity:0.55;cursor:not-allowed;}
+  .notify-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .notify-dot{width:0.5rem;height:0.5rem;border-radius:50%;background:currentColor;opacity:0.5;}
+  .notify-btn[aria-pressed="true"] .notify-dot{opacity:1;}
+  /* Not-yet-allowed / blocked: a red hover cue plus an explanatory title tooltip. */
+  .notify-btn--needs:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger);color:var(--danger);}
+
+  /* ---------- buttons ---------- */
+  button{font-family:var(--sans);cursor:pointer;}
+  .btn-primary{font-size:0.88rem;font-weight:600;border:1px solid transparent;border-radius:5px;padding:0.55rem 1.15rem;background:var(--primary-bg);color:var(--primary-fg);transition:transform 0.08s ease,background 0.12s ease;}
+  .btn-primary:hover{background:var(--primary-hover);}
+  .btn-primary:active{transform:translateY(1px);}
+  .btn-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn-ghost{font-size:0.88rem;font-weight:600;border:1px solid var(--rail-strong);border-radius:5px;padding:0.55rem 1.05rem;background:transparent;color:var(--ink-soft);transition:border-color 0.12s ease,color 0.12s ease;}
+  .btn-ghost:hover{border-color:var(--ink-soft);color:var(--ink);}
+  .btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn-transport{font-family:var(--mono);min-width:6.4rem;}
+
+  /* ---------- console (timeline lives here, only when loaded) ---------- */
+  .console{background:var(--panel);border:1px solid var(--rail);border-radius:8px;padding:1.4rem 1.4rem 1.2rem;margin-bottom:1.4rem;}
+  .status-row{display:flex;align-items:center;gap:0.7rem;flex-wrap:wrap;margin-bottom:1.2rem;}
+  .status-row__spacer{flex:1;}
+  .pill{font-family:var(--mono);font-size:0.7rem;letter-spacing:0.06em;text-transform:uppercase;padding:0.3rem 0.65rem;border-radius:99px;border:1px solid var(--rail-strong);color:var(--ink-soft);display:inline-flex;align-items:center;gap:0.45rem;}
+  .pill__dot{width:0.5rem;height:0.5rem;border-radius:50%;background:var(--ink-faint);}
+  .pill--live{border-color:var(--on-fill);color:var(--live-fg);}
+  .pill--live .pill__dot{background:var(--on-fill);box-shadow:0 0 0 3px var(--on-wash);}
+
+  .legend{display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:0.6rem;font-size:0.74rem;color:var(--ink-soft);}
+  .legend__item{display:flex;align-items:center;gap:0.4rem;}
+  .legend__swatch{width:1rem;height:0.7rem;border-radius:2px;border:1px solid var(--rail-strong);}
+  .legend__swatch--on{background:var(--on-wash);}
+  .legend__swatch--paused{background:var(--paused-wash);}
+  .legend__swatch--hatch{background-image:repeating-linear-gradient(135deg, var(--hatch-a) 0 5px, var(--hatch-b) 5px 10px);}
+
+  .timeline{position:relative;padding-top:2rem;}
+  .timeline__track{position:relative;height:4.2rem;background:var(--future-wash);border-radius:5px;border:1px solid var(--rail);}
+  .seg{position:absolute;top:0;bottom:0;}
+  .seg--on{background:var(--on-wash);}
+  .seg--off{background:var(--paused-wash);}
+  .seg--hatch{background-image:repeating-linear-gradient(135deg, var(--hatch-a) 0 6px, var(--hatch-b) 6px 12px);}
+  .seg--future{background:transparent;}
+  .grid-line{position:absolute;top:0;bottom:0;width:1px;background:var(--rail-strong);opacity:0.7;}
+  .grid-label{position:absolute;bottom:0.3rem;font-family:var(--mono);font-size:0.62rem;color:var(--ink-faint);transform:translateX(-50%);white-space:nowrap;}
+  .tick{position:absolute;top:40%;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);border:2px solid var(--c);background:var(--panel);color:var(--c);padding:0;cursor:pointer;}
+  .tick--past{background:var(--c);}
+  .tick--multi{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--c);}
+  .tick:hover{box-shadow:0 0 0 5px color-mix(in srgb, var(--c) 24%, transparent);}
+  .tick--multi:hover{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--c),0 0 0 7px color-mix(in srgb, var(--c) 24%, transparent);}
+  .tick:focus-visible{outline:2px solid var(--c);outline-offset:3px;}
+  .tick__count{position:absolute;top:-9px;left:50%;transform:translateX(-50%);min-width:15px;height:15px;padding:0 3px;border-radius:99px;background:var(--accent);color:var(--accent-fg);font-family:var(--mono);font-size:9px;font-weight:700;line-height:15px;text-align:center;}
+  .now-marker{position:absolute;top:-1.6rem;bottom:0;width:2px;background:var(--marker-idle);transform:translateX(-50%);transition:background 0.15s ease;}
+  .now-marker::before{content:"NOW";position:absolute;top:0;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:0.6rem;letter-spacing:0.06em;font-weight:700;color:var(--marker-idle);white-space:nowrap;transition:color 0.15s ease;}
+  .now-marker--live{background:var(--danger);}
+  .now-marker--live::before{color:var(--danger);}
+
+  .tip{position:absolute;z-index:20;transform:translate(-50%, calc(-100% - 9px));background:var(--tip-bg);color:var(--tip-fg);border-radius:6px;padding:0.55rem 0.7rem;min-width:11rem;max-width:17rem;box-shadow:0 8px 20px var(--tip-shadow);pointer-events:none;}
+  .tip::after{content:"";position:absolute;bottom:-5px;left:50%;transform:translateX(-50%) rotate(45deg);width:9px;height:9px;background:var(--tip-bg);}
+  .tip__time{font-family:var(--mono);font-size:0.66rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--tip-accent);margin-bottom:0.35rem;}
+  .tip__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.25rem;}
+  .tip__list li{display:flex;align-items:baseline;gap:0.45rem;font-size:0.8rem;line-height:1.3;}
+  .tip__dot{flex:none;width:0.5rem;height:0.5rem;border-radius:50%;background:var(--c);align-self:center;}
+
+  .alert-banner{position:relative;}
+  .alert-banner.is-active{margin-top:1.6rem;background:var(--danger-soft);border:1px solid var(--danger);border-radius:6px;padding:0.7rem 0.9rem;}
+  .alert-banner__caret{position:absolute;top:-6px;width:10px;height:10px;background:var(--danger-soft);border-left:1px solid var(--danger);border-top:1px solid var(--danger);transform:translateX(-50%) rotate(45deg);}
+  .alert-banner__head{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;color:var(--danger);margin-bottom:0.4rem;}
+  .alert-banner__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.28rem;}
+  .alert-banner__list li{display:flex;align-items:baseline;gap:0.5rem;font-size:0.9rem;line-height:1.35;}
+  .alert-banner__dot{flex:none;width:0.55rem;height:0.55rem;border-radius:50%;background:var(--c);align-self:center;}
+
+  .timeline-stats{display:flex;flex-wrap:wrap;gap:1.3rem;margin-top:0.85rem;font-family:var(--mono);font-size:0.75rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
+  .timeline-stats b{color:var(--ink);font-weight:700;}
+  .timeline-stats span{display:inline-flex;align-items:center;gap:0.45rem;}
+  .timeline-stats .st-dot{width:0.55rem;height:0.55rem;border-radius:50%;flex:none;}
+  .timeline-stats .st-fired .st-dot{background:var(--ink-soft);}
+  .timeline-stats .st-left .st-dot{border:1.5px solid var(--ink-faint);}
+
+  /* ---------- event list ---------- */
+  .list-section{margin-bottom:1.4rem;}
+  .list-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:0.3rem;}
+  .list-head__title{font-family:var(--mono);font-size:0.7rem;letter-spacing:0.09em;text-transform:uppercase;color:var(--ink-faint);margin:0;}
+  .list-head__count{font-family:var(--mono);font-size:0.7rem;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+  .entry-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;}
+  .entry{display:grid;grid-template-columns:1.1rem 3.6rem 1fr;align-items:baseline;gap:0.7rem;padding:0.5rem 0;border-bottom:1px solid var(--rail);}
+  .entry:last-child{border-bottom:none;}
+  .entry__dot{width:0.6rem;height:0.6rem;border-radius:50%;background:var(--c);align-self:center;}
+  .entry__time{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.85rem;color:var(--ink-soft);}
+  .entry__msg{font-size:0.92rem;line-height:1.4;}
+  .entry__day{font-family:var(--mono);font-size:0.68rem;color:var(--accent);background:var(--accent-soft);border-radius:3px;padding:0.05rem 0.32rem;margin-right:0.4rem;white-space:nowrap;}
+  .entry--past{opacity:0.62;}
+  .entry--next{background:linear-gradient(90deg, var(--accent-soft), transparent 92%);margin:0 -0.6rem;padding-left:0.6rem;border-radius:4px;border-bottom-color:transparent;}
+  .btn-expand{margin-top:0.7rem;font-family:var(--mono);font-size:0.78rem;font-weight:600;letter-spacing:0.03em;color:var(--accent);background:transparent;border:1px dashed var(--rail-strong);border-radius:5px;padding:0.45rem 0.9rem;display:inline-flex;align-items:center;gap:0.4rem;}
+  .btn-expand:hover{border-color:var(--accent);}
+  .btn-expand:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn-expand__chev{transition:transform 0.15s ease;}
+  .btn-expand[aria-expanded="true"] .btn-expand__chev{transform:rotate(180deg);}
+
+  /* ---------- composer ---------- */
+  .composer{background:var(--panel);border:1px solid var(--rail);border-radius:8px;padding:1.4rem;}
+  .composer__label{display:block;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:0.6rem;}
+  .composer textarea{width:100%;min-height:8rem;resize:vertical;font-family:var(--mono);font-size:0.86rem;line-height:1.6;padding:0.8rem;border:1px solid var(--rail-strong);border-radius:5px;background:var(--paper);color:var(--ink);}
+  .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  .composer__row{display:flex;justify-content:space-between;align-items:center;margin-top:0.9rem;gap:1rem;flex-wrap:wrap;}
+  .composer__hint{display:flex;flex-direction:column;gap:0.4rem;}
+  .composer__hint code{font-family:var(--mono);font-size:0.8rem;background:var(--paper);padding:0.1rem 0.35rem;border-radius:3px;border:1px solid var(--rail);color:var(--ink-soft);}
+  .hint-line{display:flex;align-items:center;gap:0.55rem;flex-wrap:wrap;color:var(--ink-faint);}
+  .hint-label{font-family:var(--mono);font-size:0.66rem;letter-spacing:0.08em;text-transform:uppercase;}
+  .hint-sub{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;font-size:0.76rem;color:var(--ink-faint);}
+  #format-example{cursor:text;}
+  .copy-btn{font-family:var(--sans);font-size:0.72rem;font-weight:600;color:var(--ink-soft);background:var(--panel);border:1px solid var(--rail-strong);border-radius:4px;padding:0.2rem 0.55rem;cursor:pointer;transition:border-color 0.12s ease,color 0.12s ease;}
+  .copy-btn:hover{border-color:var(--ink-soft);color:var(--ink);}
+  .copy-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .copy-btn.is-copied{color:var(--live-fg);border-color:var(--on-fill);}
+  .composer__error{color:var(--danger);font-size:0.8rem;margin-top:0.6rem;min-height:1rem;}
+
+  .noscript{max-width:940px;margin:2rem auto;padding:1rem 1.5rem;color:var(--danger);}
+
+  @media (max-width:600px){
+    .app{padding:1.5rem 1rem 3rem;}
+    .topbar{align-items:stretch;}
+    .settings{width:100%;justify-content:space-between;}
+    .entry{grid-template-columns:0.9rem 3.2rem 1fr;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+<noscript><p class="noscript">Cue Sheet needs JavaScript to watch your schedule and sound the alert. Please enable it and reload.</p></noscript>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1 class="brand__title">Cue Sheet</h1>
+      <p class="brand__tag">Paste a schedule, arm the watch, and get a heads-up before each cue.</p>
+    </div>
+    <div class="settings">
+      <div class="field">
+        <label class="field__label" id="lead-label" for="lead-input">Alert lead time</label>
+        <div class="field__control" id="lead-control">
+          <span class="field__suffix">Alert me</span>
+          <input id="lead-input" class="field__input" type="number" min="0" max="180" step="1" inputmode="numeric" aria-labelledby="lead-label" aria-describedby="lead-suffix">
+          <span class="field__suffix" id="lead-suffix">min before a cue</span>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field__label" id="notify-label">Desktop alerts</span>
+        <button class="notify-btn" type="button" id="notify-btn" aria-pressed="false" aria-labelledby="notify-label">
+          <span class="notify-dot" aria-hidden="true"></span><span id="notify-text">Off</span>
+        </button>
+      </div>
+      <div class="field">
+        <span class="field__label" id="theme-label">Theme</span>
+        <div class="theme" role="radiogroup" aria-labelledby="theme-label">
+          <button class="theme__btn" type="button" role="radio" data-theme-choice="light" aria-checked="false">Light</button>
+          <button class="theme__btn" type="button" role="radio" data-theme-choice="auto" aria-checked="false">Auto</button>
+          <button class="theme__btn" type="button" role="radio" data-theme-choice="dark" aria-checked="false">Dark</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="console" id="console" hidden aria-label="Timeline and transport">
+    <div class="status-row">
+      <button class="btn-primary btn-transport" id="play-btn" type="button">▶ Play</button>
+      <button class="btn-ghost" id="clear-btn" type="button">Clear</button>
+      <span class="status-row__spacer"></span>
+      <span class="pill" id="status-pill"><span class="pill__dot"></span><span id="status-pill-text">Stopped</span></span>
+    </div>
+
+    <div class="legend">
+      <span class="legend__item"><span class="legend__swatch legend__swatch--on"></span>Watching</span>
+      <span class="legend__item"><span class="legend__swatch legend__swatch--paused"></span>Stopped</span>
+      <span class="legend__item"><span class="legend__swatch legend__swatch--hatch"></span>Before first watch</span>
+    </div>
+
+    <div class="timeline">
+      <div class="timeline__track" id="timeline-track"></div>
+      <div class="tip" id="dot-tip" hidden></div>
+    </div>
+
+    <div class="timeline-stats" id="timeline-stats" hidden></div>
+
+    <div class="alert-banner" id="alert-banner" role="status" aria-live="polite" aria-atomic="true"></div>
+  </section>
+
+  <section class="list-section" id="list-section" hidden aria-label="Scheduled cues">
+    <div class="list-head">
+      <p class="list-head__title">Cues</p>
+      <span class="list-head__count" id="list-count"></span>
+    </div>
+    <ul class="entry-list" id="entry-list"></ul>
+    <button class="btn-expand" id="expand-btn" type="button" hidden aria-expanded="false">
+      <span id="expand-label">Show all</span><span class="btn-expand__chev" aria-hidden="true">▾</span>
+    </button>
+  </section>
+
+  <section class="composer" aria-label="Schedule input">
+    <label class="composer__label" for="schedule-input">Schedule — one cue per line</label>
+    <textarea id="schedule-input" spellcheck="false"></textarea>
+    <div class="composer__row">
+      <div class="composer__hint">
+        <div class="hint-line">
+          <span class="hint-label">Format</span>
+          <code id="format-example">14:30: Call with client</code>
+          <button class="copy-btn" id="copy-format" type="button" data-label="Copy" aria-label="Copy the format example">Copy</button>
+        </div>
+        <div class="hint-sub">Add a date to cross days — <code>10 Jul 09:00: …</code> or <code>Jul 10, 09:00: …</code></div>
+      </div>
+      <button class="btn-primary" id="load-btn" type="button">Load schedule</button>
+    </div>
+    <p class="composer__error" id="composer-error" role="alert"></p>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var LS = { theme:"cuesheet.theme", lead:"cuesheet.leadMinutes", sched:"cuesheet.schedule", notify:"cuesheet.notify", watch:"cuesheet.watch" };
+  // Two palettes so cue dots clear the 3:1 non-text contrast minimum on both the
+  // near-white light track and the near-black dark track. Entries keep a stable
+  // colorIndex; the actual colour is resolved per-theme at render time.
+  var PALETTE_LIGHT = ["#C1440E","#2F5D8A","#5B3E96","#0F7173","#8A6D00","#A63A50","#5E6B34","#8A5A2B","#9C3D54","#3D5A80"];
+  var PALETTE_DARK  = ["#F08A5A","#7FB0E4","#B49BEC","#4FC4C0","#E8C55A","#EE8AA0","#B7C77A","#D6A878","#E88EA4","#93AEDA"];
+  var COLLAPSED_COUNT = 5;
+
+  // Optional date prefix on a cue line: "10 Jul[y][,] HH:MM:" or "Jul[y] 10[,] HH:MM:".
+  var MONTHS = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+  var MO_RE = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+  var LINE_RE = new RegExp(
+    "^\\s*(?:(\\d{1,2})\\s+(" + MO_RE + ")|(" + MO_RE + ")\\s+(\\d{1,2}))?\\s*,?\\s*(\\d{1,2}:\\d{2}\\s*(?:[APap][Mm])?)\\s*:\\s*(.+?)\\s*$", "i"
+  );
+
+  function now(){ return (window.__debugNow || Date.now()); }
+  function isDarkTheme(){
+    var attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+  function currentPalette(){ return isDarkTheme() ? PALETTE_DARK : PALETTE_LIGHT; }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+
+  function parseTimeToMinutes(str){
+    var m = str.match(/^(\d{1,2}):(\d{2})\s*([APap][Mm])?$/);
+    if (!m) return null;
+    var h = parseInt(m[1],10), min = parseInt(m[2],10);
+    if (min > 59) return null;
+    if (m[3]){
+      var ap = m[3].toLowerCase();
+      if (h < 1 || h > 12) return null;
+      if (h === 12) h = 0;
+      if (ap === "pm") h += 12;
+    } else if (h > 23) return null;
+    return h*60+min;
+  }
+
+  function monthIndex(word){ return MONTHS[word.slice(0,3).toLowerCase()]; }
+  function parseSchedule(text){
+    var today = new Date(now());
+    var todayBase = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    var out = [], skipped = 0;
+    text.split("\n").forEach(function(line){
+      if (!line.trim()) return;
+      var m = line.match(LINE_RE);
+      if (!m){ skipped++; return; }
+      var mins = parseTimeToMinutes(m[5].trim());
+      if (mins == null){ skipped++; return; }
+      var msg = m[6].trim();
+      if (!msg){ skipped++; return; }
+      var ts, dated = false, mo = null, day = null;
+      if (m[1] != null){ day = parseInt(m[1],10); mo = monthIndex(m[2]); dated = true; }
+      else if (m[3] != null){ mo = monthIndex(m[3]); day = parseInt(m[4],10); dated = true; }
+      if (dated){
+        if (day < 1 || day > 31 || mo == null){ skipped++; return; }
+        ts = new Date(today.getFullYear(), mo, day).getTime() + mins*60000;
+      } else {
+        ts = todayBase + mins*60000;
+      }
+      out.push({ message: msg, mins: mins, ts: ts });
+    });
+    out.sort(function(a,b){ return a.ts - b.ts; });
+    out.forEach(function(e,i){
+      e.colorIndex = i % PALETTE_LIGHT.length;
+      e.color = PALETTE_LIGHT[e.colorIndex];
+      e.timeStr = formatClock(e.ts);
+      e.dayLabel = isToday(e.ts) ? "" : dayTag(e.ts);
+    });
+    return { entries: out, skipped: skipped };
+  }
+
+  function computeBatches(entries){
+    var map = new Map();
+    entries.forEach(function(e){
+      if (!map.has(e.ts)) map.set(e.ts, []);
+      map.get(e.ts).push(e);
+    });
+    return Array.from(map.entries()).map(function(pair){
+      return { ts: pair[0], items: pair[1] };
+    }).sort(function(a,b){ return a.ts - b.ts; });
+  }
+
+  function formatClock(ts){
+    var d = new Date(ts);
+    return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+  }
+  var MON_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function isToday(ts){
+    var d = new Date(ts), n = new Date(now());
+    return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  }
+  function dayTag(ts){ var d = new Date(ts); return MON_ABBR[d.getMonth()] + " " + d.getDate(); }
+  function formatWhen(ts){ return (isToday(ts) ? "" : dayTag(ts) + " ") + formatClock(ts); }
+
+  function demoScheduleText(){
+    var t = now();
+    function fmt(off){ return formatClock(t + off*60000); }
+    var lines = [
+      [-120,"Morning stretch"],[-95,"Check overnight alerts"],
+      [-60,"Stand-up — share yesterday's progress"],[-60,"Stand-up — flag blockers"],
+      [-40,"Reply to design review thread"],[-15,"Coffee refill"],
+      [4,"Client call — bring the roadmap slide"],[4,"Client call — loop in support"],[4,"Client call — confirm renewal date"],
+      [22,"Ship the changelog email"],[48,"Pick up dry cleaning"],[70,"Review PR #482"],
+      [95,"Water the plants"],[120,"Draft Friday retro notes"],[150,"Stretch break"],
+      [170,"Call mom"],[200,"Pack gym bag for tomorrow"]
+    ];
+    return lines.map(function(p){ return fmt(p[0]) + ": " + p[1]; }).join("\n");
+  }
+
+  // ---- state ----
+  var entries = [], batches = [];
+  var armed = false, history = [], firstPlayTs = null;
+  var alarmedBatches = new Set(), upcomingBatch = null;
+  var leadMinutes = 7, theme = "auto", expanded = false, hoverBatchTs = null;
+  var notifyEnabled = false, lastBannerSig = null;
+  var audioCtx = null, tickTimer = null;
+
+  var el = {
+    input: document.getElementById("schedule-input"),
+    loadBtn: document.getElementById("load-btn"),
+    error: document.getElementById("composer-error"),
+    console: document.getElementById("console"),
+    listSection: document.getElementById("list-section"),
+    playBtn: document.getElementById("play-btn"),
+    clearBtn: document.getElementById("clear-btn"),
+    statusPill: document.getElementById("status-pill"),
+    statusPillText: document.getElementById("status-pill-text"),
+    legend: null,
+    track: document.getElementById("timeline-track"),
+    dotTip: document.getElementById("dot-tip"),
+    timeline: null,
+    alertBanner: document.getElementById("alert-banner"),
+    entryList: document.getElementById("entry-list"),
+    listCount: document.getElementById("list-count"),
+    expandBtn: document.getElementById("expand-btn"),
+    expandLabel: document.getElementById("expand-label"),
+    leadInput: document.getElementById("lead-input"),
+    leadControl: document.getElementById("lead-control"),
+    formatExample: document.getElementById("format-example"),
+    copyFormat: document.getElementById("copy-format"),
+    notifyBtn: document.getElementById("notify-btn"),
+    notifyText: document.getElementById("notify-text"),
+    timelineStats: document.getElementById("timeline-stats"),
+    themeBtns: Array.prototype.slice.call(document.querySelectorAll(".theme__btn"))
+  };
+  el.timeline = el.track.parentNode;
+
+  // ---- settings ----
+  function applyTheme(next, persist){
+    theme = next;
+    document.documentElement.setAttribute("data-theme", next);
+    el.themeBtns.forEach(function(b){
+      var on = b.dataset.themeChoice === next;
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1; // roving tabindex: the group is a single Tab stop
+    });
+    if (persist) lsSet(LS.theme, next);
+    if (entries.length) render(); // re-resolve dot colours for the new palette
+  }
+  function onThemeKeydown(e){
+    var idx = el.themeBtns.indexOf(document.activeElement);
+    if (idx === -1) return;
+    var dir = 0;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") dir = 1;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") dir = -1;
+    else return;
+    e.preventDefault();
+    var n = el.themeBtns.length;
+    var target = el.themeBtns[(idx + dir + n) % n];
+    applyTheme(target.dataset.themeChoice, true);
+    target.focus();
+  }
+
+  function loadSettings(){
+    var storedTheme = lsGet(LS.theme) || "auto";
+    applyTheme(storedTheme, false);
+    var ld = parseInt(lsGet(LS.lead), 10);
+    if (!isNaN(ld) && ld >= 0 && ld <= 180) leadMinutes = ld;
+    el.leadInput.value = leadMinutes;
+    var wantNotify = lsGet(LS.notify) === "1";
+    notifyEnabled = wantNotify && ("Notification" in window) && Notification.permission === "granted";
+    var saved = lsGet(LS.sched);
+    el.input.value = (saved !== null) ? saved : demoScheduleText();
+  }
+
+  function commitLead(){
+    var v = parseInt(el.leadInput.value, 10);
+    if (isNaN(v) || v < 0) v = 0;
+    if (v > 180) v = 180;
+    leadMinutes = v;
+    el.leadInput.value = v;
+    lsSet(LS.lead, String(v));
+    // Changing the lead time must not itself ding. Silently mark any batch already
+    // inside the (possibly widened) window as handled, so raising the lead never
+    // retroactively alerts for a far-off cue; genuine upcoming crossings are still
+    // caught by the 1-second tick.
+    var t = now(), leadMs = leadMinutes * 60000, changed = false;
+    batches.forEach(function(b){
+      var diff = b.ts - t;
+      if (armed && diff <= leadMs && diff > -60000 && !alarmedBatches.has(b.ts)){
+        alarmedBatches.add(b.ts); changed = true;
+      }
+    });
+    if (changed) saveWatch();
+    render();
+  }
+
+  // ---- copy format example ----
+  function legacyCopy(text, cb){
+    try{
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly","");
+      ta.style.position = "absolute"; ta.style.left = "-9999px";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      cb(!!ok);
+    }catch(e){ cb(false); }
+  }
+  function copyExample(){
+    var btn = el.copyFormat, text = el.formatExample.textContent;
+    function flash(ok){
+      btn.textContent = ok ? "Copied" : "⌘C to copy";
+      btn.classList.toggle("is-copied", ok);
+      setTimeout(function(){ btn.textContent = btn.getAttribute("data-label"); btn.classList.remove("is-copied"); }, 1200);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){ flash(true); }, function(){ legacyCopy(text, flash); });
+    } else {
+      legacyCopy(text, flash);
+    }
+  }
+
+  // ---- desktop notifications ----
+  function supportsNotify(){ return ("Notification" in window); }
+  function applyNotifyUI(){
+    var btn = el.notifyBtn, txt = el.notifyText;
+    btn.classList.remove("notify-btn--needs");
+    if (!supportsNotify()){
+      btn.disabled = true; btn.setAttribute("aria-pressed","false");
+      txt.textContent = "Unavailable"; btn.title = "This browser can't show desktop notifications.";
+      return;
+    }
+    var perm = Notification.permission;
+    if (notifyEnabled && perm === "granted"){
+      btn.disabled = false; btn.setAttribute("aria-pressed","true");
+      txt.textContent = "On"; btn.title = "Desktop alerts are on. Click to turn them off.";
+      return;
+    }
+    // Not currently alerting. Flag the button (red on hover + tooltip) whenever a
+    // click can't simply switch it on — i.e. permission still has to be requested,
+    // or the browser is actively blocking it.
+    notifyEnabled = false;
+    btn.disabled = false; btn.setAttribute("aria-pressed","false");
+    if (perm === "denied"){
+      txt.textContent = "Blocked";
+      btn.title = "Your browser is blocking desktop alerts for this page. Allow notifications for this site in your browser settings, then reload.";
+      btn.classList.add("notify-btn--needs");
+    } else if (perm === "granted"){
+      txt.textContent = "Off";
+      btn.title = "Click to turn desktop alerts on.";
+    } else {
+      txt.textContent = "Off";
+      btn.title = "Desktop alerts are off. Click to have your browser ask permission to send notifications from this page.";
+      btn.classList.add("notify-btn--needs");
+    }
+  }
+  function toggleNotify(){
+    if (!supportsNotify()) return;
+    if (notifyEnabled){ notifyEnabled = false; lsSet(LS.notify,"0"); applyNotifyUI(); return; }
+    if (Notification.permission === "granted"){
+      notifyEnabled = true; lsSet(LS.notify,"1"); applyNotifyUI();
+    } else if (Notification.permission === "denied"){
+      applyNotifyUI();
+    } else {
+      Notification.requestPermission().then(function(p){
+        notifyEnabled = (p === "granted");
+        lsSet(LS.notify, notifyEnabled ? "1" : "0");
+        applyNotifyUI();
+      });
+    }
+  }
+  function sendNotification(b, t){
+    if (!notifyEnabled || !supportsNotify() || Notification.permission !== "granted") return;
+    try{
+      var mins = Math.max(0, Math.round((b.ts - t)/60000));
+      var when = mins === 0 ? "now" : "in " + mins + " min";
+      new Notification("Cue Sheet — " + when + " · " + formatWhen(b.ts), {
+        body: b.items.map(function(i){ return i.message; }).join("\n"),
+        tag: "cuesheet-" + b.ts
+      });
+    }catch(e){}
+  }
+
+  // ---- notifier (watch) state persistence ----
+  function watchDay(){ var d = new Date(now()); return d.getFullYear() + "-" + (d.getMonth()+1) + "-" + d.getDate(); }
+  function saveWatch(){
+    lsSet(LS.watch, JSON.stringify({
+      day: watchDay(), armed: armed, history: history,
+      firstPlayTs: firstPlayTs, alarmed: Array.from(alarmedBatches)
+    }));
+  }
+  function applySavedWatch(raw){
+    try{
+      var w = JSON.parse(raw);
+      if (!w || w.day !== watchDay()){ lsDel(LS.watch); return; }
+      armed = !!w.armed;
+      history = Array.isArray(w.history) ? w.history : [];
+      firstPlayTs = (typeof w.firstPlayTs === "number") ? w.firstPlayTs : null;
+      alarmedBatches = new Set(Array.isArray(w.alarmed) ? w.alarmed : []);
+      // Re-persist: loadSchedule() reset the stored watch just before this runs,
+      // so write the restored state back or it would be lost on the next reload.
+      saveWatch();
+      render();
+    }catch(e){ lsDel(LS.watch); }
+  }
+
+  // ---- audio ----
+  function ensureAudio(){
+    if (!audioCtx){
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtx = new Ctx();
+    }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function playDing(){
+    if (!audioCtx) return;
+    try{
+      var t0 = audioCtx.currentTime;
+      [880,1320].forEach(function(freq,i){
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, t0 + i*0.15);
+        gain.gain.linearRampToValueAtTime(0.3, t0 + i*0.15 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + i*0.15 + 0.3);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t0 + i*0.15);
+        osc.stop(t0 + i*0.15 + 0.32);
+      });
+    }catch(e){}
+  }
+
+  // ---- transport ----
+  function toggleArmed(){
+    ensureAudio();
+    var t = now();
+    armed = !armed;
+    if (armed && firstPlayTs === null) firstPlayTs = t;
+    history.push({ state: armed ? "on" : "off", start: t });
+    saveWatch();
+    render();
+  }
+
+  function clearAll(){
+    entries = []; batches = [];
+    armed = false; history = []; firstPlayTs = null;
+    alarmedBatches = new Set(); upcomingBatch = null;
+    expanded = false; hoverBatchTs = null;
+    el.input.value = "";
+    el.error.textContent = "";
+    lsDel(LS.sched);
+    lsDel(LS.watch);
+    stopTicking();
+    render();
+  }
+
+  function loadSchedule(){
+    var parsed = parseSchedule(el.input.value);
+    if (parsed.entries.length === 0){
+      el.error.textContent = el.input.value.trim()
+        ? "No cues found. Each line needs a time and a message, like 14:30: Call with client."
+        : "Add at least one cue to start, like 14:30: Call with client.";
+      entries = []; batches = [];
+      stopTicking();
+      render();
+      return;
+    }
+    el.error.textContent = parsed.skipped > 0
+      ? parsed.skipped + (parsed.skipped === 1 ? " line was skipped — it didn't match time: message." : " lines were skipped — they didn't match time: message.")
+      : "";
+    entries = parsed.entries;
+    batches = computeBatches(entries);
+    armed = false; history = []; firstPlayTs = null;
+    alarmedBatches = new Set(); upcomingBatch = null;
+    expanded = false; hoverBatchTs = null;
+    lsSet(LS.sched, el.input.value);
+    saveWatch();
+    startTicking();
+    render();
+  }
+
+  function startTicking(){
+    if (tickTimer) return;
+    tickTimer = setInterval(function(){ checkAlarms(); render(); }, 1000);
+  }
+  function stopTicking(){
+    if (tickTimer){ clearInterval(tickTimer); tickTimer = null; }
+  }
+
+  function checkAlarms(){
+    var t = now();
+    var leadMs = leadMinutes * 60000;
+    var changed = false;
+    batches.forEach(function(b){
+      var diff = b.ts - t;
+      if (armed && diff <= leadMs && diff > -60000 && !alarmedBatches.has(b.ts)){
+        alarmedBatches.add(b.ts);
+        upcomingBatch = b;
+        changed = true;
+        playDing();
+        sendNotification(b, t);
+      }
+    });
+    if (upcomingBatch && t - upcomingBatch.ts > 2*60000) upcomingBatch = null;
+    if (changed) saveWatch();
+  }
+
+  // ---- geometry ----
+  function getRange(){
+    var t = now();
+    var min = t, max = t;
+    for (var i=0;i<entries.length;i++){
+      var ts = entries[i].ts;
+      if (ts < min) min = ts;
+      if (ts > max) max = ts;
+    }
+    if (min === max){ min -= 30*60000; max += 30*60000; }
+    var pad = (max-min)*0.06;
+    return { start: min-pad, end: max+pad };
+  }
+  function pct(ts, range){
+    return Math.min(100, Math.max(0, (ts-range.start)/(range.end-range.start)*100));
+  }
+  function chooseStep(spanMin){
+    var steps = [15,30,60,120,180,240,360];
+    for (var i=0;i<steps.length;i++) if (spanMin/steps[i] <= 8) return steps[i];
+    return 480;
+  }
+  function buildSegments(range){
+    var t = now();
+    var segs = [];
+    if (firstPlayTs === null){
+      segs.push({ from: range.start, to: t, type: "hatch" });
+    } else {
+      if (range.start < firstPlayTs) segs.push({ from: range.start, to: firstPlayTs, type: "hatch" });
+      for (var i=0;i<history.length;i++){
+        var h = history[i];
+        var from = Math.max(h.start, firstPlayTs);
+        var to = (i+1 < history.length) ? history[i+1].start : t;
+        if (to > from) segs.push({ from: from, to: to, type: h.state });
+      }
+    }
+    segs.push({ from: t, to: range.end, type: "future" });
+    return segs;
+  }
+
+  // ---- rendering ----
+  function renderEntryRow(e, isNext){
+    var isPast = e.ts <= now();
+    return '<li class="entry' + (isPast ? " entry--past" : "") + (isNext ? " entry--next" : "") + '" style="--c:' + e.color + '">' +
+      '<span class="entry__dot"></span>' +
+      '<span class="entry__time">' + escapeHtml(e.timeStr) + '</span>' +
+      '<span class="entry__msg">' + (e.dayLabel ? '<span class="entry__day">' + escapeHtml(e.dayLabel) + '</span>' : "") + escapeHtml(e.message) + '</span>' +
+      '</li>';
+  }
+
+  function renderList(nextTs){
+    var total = entries.length;
+    el.listCount.textContent = total + (total === 1 ? " cue" : " cues");
+    var shown;
+    if (expanded){
+      shown = entries;
+    } else {
+      // Window of COLLAPSED_COUNT centred on the nearest upcoming cue:
+      // a couple already past, the nearest, and a couple still to come.
+      var t = now();
+      var nextIdx = -1;
+      for (var i=0;i<total;i++){ if (entries[i].ts > t){ nextIdx = i; break; } }
+      if (nextIdx === -1) nextIdx = total - 1; // everything is past -> show the tail
+      var before = Math.floor((COLLAPSED_COUNT - 1) / 2);
+      var start = nextIdx - before;
+      var end = start + COLLAPSED_COUNT;
+      if (start < 0){ start = 0; end = Math.min(total, COLLAPSED_COUNT); }
+      if (end > total){ end = total; start = Math.max(0, end - COLLAPSED_COUNT); }
+      shown = entries.slice(start, end);
+    }
+    el.entryList.innerHTML = shown.map(function(e){ return renderEntryRow(e, e.ts === nextTs); }).join("");
+    if (total > COLLAPSED_COUNT){
+      el.expandBtn.hidden = false;
+      el.expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+      el.expandLabel.textContent = expanded ? "Show fewer" : ("Show all " + total);
+    } else {
+      el.expandBtn.hidden = true;
+    }
+  }
+
+  function renderTip(){
+    if (hoverBatchTs == null){ el.dotTip.hidden = true; return; }
+    var b = null;
+    for (var i=0;i<batches.length;i++){ if (batches[i].ts === hoverBatchTs){ b = batches[i]; break; } }
+    if (!b){ el.dotTip.hidden = true; return; }
+    var range = getRange();
+    var leftPct = pct(b.ts, range);
+    el.dotTip.innerHTML =
+      '<div class="tip__time">' + escapeHtml(formatWhen(b.ts)) + (b.items.length > 1 ? " · " + b.items.length + " cues" : "") + '</div>' +
+      '<ul class="tip__list">' + b.items.map(function(it){
+        return '<li style="--c:' + it.color + '"><span class="tip__dot"></span>' + escapeHtml(it.message) + '</li>';
+      }).join("") + '</ul>';
+    el.dotTip.hidden = false;
+    el.dotTip.style.top = el.track.offsetTop + "px";
+    var w = el.timeline.clientWidth;
+    var tw = el.dotTip.offsetWidth;
+    var x = w * leftPct/100;
+    x = Math.max(tw/2 + 4, Math.min(w - tw/2 - 4, x));
+    el.dotTip.style.left = x + "px";
+  }
+
+  function render(){
+    var hasEntries = entries.length > 0;
+    el.console.hidden = !hasEntries;
+    el.listSection.hidden = !hasEntries;
+    if (!hasEntries){ el.dotTip.hidden = true; el.timelineStats.hidden = true; return; }
+
+    // Resolve each cue's colour for the active theme so dots stay legible in both.
+    var pal = currentPalette();
+    for (var pi=0; pi<entries.length; pi++){ entries[pi].color = pal[entries[pi].colorIndex]; }
+
+    el.playBtn.textContent = armed ? "■ Stop" : "▶ Play";
+    el.statusPill.className = "pill" + (armed ? " pill--live" : "");
+    el.statusPillText.textContent = armed ? "Watching" : "Stopped";
+
+    var t = now();
+    var nextBatch = null;
+    for (var i=0;i<batches.length;i++){ if (batches[i].ts > t){ nextBatch = batches[i]; break; } }
+    var nextTs = nextBatch ? nextBatch.ts : null;
+
+    renderList(nextTs);
+
+    var range = getRange();
+    var segs = buildSegments(range);
+    var html = "";
+    segs.forEach(function(s){
+      var left = pct(s.from, range), width = pct(s.to, range) - pct(s.from, range);
+      if (width <= 0) return;
+      html += '<div class="seg seg--' + s.type + '" style="left:' + left + '%;width:' + width + '%"></div>';
+    });
+
+    var spanMin = (range.end - range.start) / 60000;
+    var stepMs = chooseStep(spanMin) * 60000;
+    // Snap gridlines to local-clock boundaries (not UTC epoch multiples) so hour
+    // labels land on round times even in half-hour-offset timezones.
+    var tzMs = new Date(range.start).getTimezoneOffset() * 60000;
+    var g = Math.ceil((range.start - tzMs)/stepMs)*stepMs + tzMs;
+    for (; g <= range.end; g += stepMs){
+      var gl = pct(g, range);
+      html += '<div class="grid-line" style="left:' + gl + '%"></div>';
+      html += '<div class="grid-label" style="left:' + gl + '%">' + formatClock(g) + '</div>';
+    }
+
+    batches.forEach(function(b){
+      var left = pct(b.ts, range);
+      var past = b.ts <= t;
+      var multi = b.items.length > 1;
+      var label = formatWhen(b.ts) + " — " + b.items.map(function(it){ return it.message; }).join("; ");
+      html += '<button type="button" class="tick' + (past ? " tick--past" : "") + (multi ? " tick--multi" : "") +
+        '" data-ts="' + b.ts + '" style="left:' + left + '%;--c:' + b.items[0].color + '" aria-label="' + escapeHtml(label) + '">' +
+        (multi ? '<span class="tick__count" aria-hidden="true">' + b.items.length + '</span>' : "") +
+        '</button>';
+    });
+
+    html += '<div class="now-marker' + (armed ? " now-marker--live" : "") + '" style="left:' + pct(t, range) + '%"></div>';
+    el.track.innerHTML = html;
+
+    var firedCount = 0;
+    for (var fi=0; fi<entries.length; fi++){ if (entries[fi].ts <= t) firedCount++; }
+    var leftCount = entries.length - firedCount;
+    el.timelineStats.innerHTML =
+      '<span class="st-fired"><span class="st-dot"></span><b>' + firedCount + '</b>&nbsp;fired</span>' +
+      '<span class="st-left"><span class="st-dot"></span><b>' + leftCount + '</b>&nbsp;left to fire</span>';
+    el.timelineStats.hidden = false;
+
+    if (upcomingBatch){
+      var mins = Math.max(0, Math.round((upcomingBatch.ts - t)/60000));
+      var when = mins === 0 ? "now" : "in " + mins + " min";
+      // Only rebuild the live region when the announced content actually changes,
+      // so the 1s render loop doesn't re-announce identical text every tick.
+      var sig = upcomingBatch.ts + "|" + when;
+      if (sig !== lastBannerSig){
+        lastBannerSig = sig;
+        var items = upcomingBatch.items.slice(0,3).map(function(it){
+          return '<li style="--c:' + it.color + '"><span class="alert-banner__dot"></span>' + escapeHtml(it.message) + '</li>';
+        }).join("");
+        el.alertBanner.innerHTML =
+          '<span class="alert-banner__caret" style="left:' + pct(t, range) + '%"></span>' +
+          '<div class="alert-banner__head">Heads up — ' + when + ' · ' + formatWhen(upcomingBatch.ts) + '</div>' +
+          '<ul class="alert-banner__list">' + items + '</ul>';
+        el.alertBanner.classList.add("is-active");
+      } else {
+        var caret = el.alertBanner.querySelector(".alert-banner__caret");
+        if (caret) caret.style.left = pct(t, range) + "%"; // reposition only, no re-announce
+      }
+    } else if (lastBannerSig !== null){
+      lastBannerSig = null;
+      el.alertBanner.classList.remove("is-active");
+      el.alertBanner.innerHTML = "";
+    }
+
+    renderTip();
+  }
+
+  // ---- events ----
+  el.loadBtn.addEventListener("click", loadSchedule);
+  el.playBtn.addEventListener("click", toggleArmed);
+  el.clearBtn.addEventListener("click", clearAll);
+  el.expandBtn.addEventListener("click", function(){ expanded = !expanded; render(); });
+  el.leadInput.addEventListener("change", commitLead);
+  // Click anywhere in the lead-time box starts editing the number.
+  el.leadControl.addEventListener("click", function(e){
+    if (e.target !== el.leadInput){ el.leadInput.focus(); el.leadInput.select(); }
+  });
+  // Double-click selects just the example text (not the "Format" label).
+  el.formatExample.addEventListener("dblclick", function(){
+    var sel = window.getSelection(); if (!sel) return;
+    var range = document.createRange();
+    range.selectNodeContents(el.formatExample);
+    sel.removeAllRanges(); sel.addRange(range);
+  });
+  el.copyFormat.addEventListener("click", copyExample);
+  el.notifyBtn.addEventListener("click", toggleNotify);
+  el.themeBtns.forEach(function(b){
+    b.addEventListener("click", function(){ applyTheme(b.dataset.themeChoice, true); });
+    b.addEventListener("keydown", onThemeKeydown);
+  });
+  if (window.matchMedia){
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    var onScheme = function(){ if (theme === "auto" && entries.length) render(); };
+    if (mq.addEventListener) mq.addEventListener("change", onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+  }
+
+  el.track.addEventListener("pointerover", function(e){
+    var dot = e.target.closest(".tick"); if (!dot) return;
+    hoverBatchTs = Number(dot.dataset.ts); renderTip();
+  });
+  el.track.addEventListener("pointerout", function(e){
+    var dot = e.target.closest(".tick"); if (!dot) return;
+    var to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".tick") : null;
+    if (!to){ hoverBatchTs = null; el.dotTip.hidden = true; }
+  });
+  el.track.addEventListener("focusin", function(e){
+    var dot = e.target.closest(".tick"); if (!dot) return;
+    hoverBatchTs = Number(dot.dataset.ts); renderTip();
+  });
+  el.track.addEventListener("focusout", function(){
+    hoverBatchTs = null; el.dotTip.hidden = true;
+  });
+
+  window.__debug = { getState: function(){ return {
+    entries: entries, batches: batches, armed: armed, history: history,
+    firstPlayTs: firstPlayTs, alarmedBatches: Array.from(alarmedBatches),
+    upcomingBatch: upcomingBatch, leadMinutes: leadMinutes, theme: theme, expanded: expanded, notifyEnabled: notifyEnabled
+  }; } };
+
+  loadSettings();
+  applyNotifyUI();
+  var savedWatchRaw = lsGet(LS.watch);
+  loadSchedule();
+  if (savedWatchRaw) applySavedWatch(savedWatchRaw);
+})();
+</script>
+</body>
+</html>
