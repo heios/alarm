@@ -165,6 +165,18 @@
   .alert-banner__list li{display:flex;align-items:baseline;gap:0.5rem;font-size:0.9rem;line-height:1.35;}
   .alert-banner__dot{flex:none;width:0.55rem;height:0.55rem;border-radius:50%;background:var(--c);align-self:center;}
 
+  /* ---------- confirm overlay ---------- */
+  .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:rgba(20,22,25,0.45);}
+  .overlay[hidden]{display:none !important;}
+  .modal{background:var(--panel);border:1px solid var(--rail-strong);border-radius:10px;box-shadow:0 18px 46px var(--tip-shadow);width:100%;max-width:25rem;padding:1.35rem 1.4rem 1.15rem;}
+  .modal__title{font-size:1.02rem;font-weight:700;color:var(--ink);margin:0 0 0.5rem;}
+  .modal__body{font-size:0.9rem;line-height:1.5;color:var(--ink-soft);margin:0 0 1.25rem;}
+  .modal__actions{display:flex;justify-content:flex-end;gap:0.6rem;}
+  .btn-danger{font-size:0.88rem;font-weight:600;border:1px solid transparent;border-radius:5px;padding:0.55rem 1.15rem;background:var(--danger);color:var(--paper);transition:filter 0.12s ease;}
+  .btn-danger:hover{filter:brightness(1.08);}
+  .btn-danger:active{transform:translateY(1px);}
+  .btn-danger:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
   .timeline-stats{display:flex;flex-wrap:wrap;gap:1.3rem;margin-top:0.85rem;font-family:var(--mono);font-size:0.75rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
   .timeline-stats b{color:var(--ink);font-weight:700;}
   .timeline-stats span{display:inline-flex;align-items:center;gap:0.45rem;}
@@ -226,7 +238,7 @@
 <body>
 <noscript><p class="noscript">Cue Sheet needs JavaScript to watch your schedule and sound the alert. Please enable it and reload.</p></noscript>
 
-<div class="app">
+<div class="app" id="app">
   <header class="topbar">
     <div class="brand">
       <h1 class="brand__title">Cue Sheet</h1>
@@ -309,6 +321,17 @@
     </div>
     <p class="composer__error" id="composer-error" role="alert"></p>
   </section>
+</div>
+
+<div class="overlay" id="clear-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="clear-modal-title" aria-describedby="clear-modal-body">
+    <h2 class="modal__title" id="clear-modal-title">Clear this schedule?</h2>
+    <p class="modal__body" id="clear-modal-body">This removes all cues and stops the watch. You can't undo it.</p>
+    <div class="modal__actions">
+      <button class="btn-ghost" type="button" id="clear-cancel">Cancel</button>
+      <button class="btn-danger" type="button" id="clear-confirm">Clear schedule</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -443,6 +466,7 @@
   var audioCtx = null, tickTimer = null;
 
   var el = {
+    app: document.getElementById("app"),
     input: document.getElementById("schedule-input"),
     loadBtn: document.getElementById("load-btn"),
     error: document.getElementById("composer-error"),
@@ -450,6 +474,9 @@
     listSection: document.getElementById("list-section"),
     playBtn: document.getElementById("play-btn"),
     clearBtn: document.getElementById("clear-btn"),
+    clearOverlay: document.getElementById("clear-overlay"),
+    clearConfirm: document.getElementById("clear-confirm"),
+    clearCancel: document.getElementById("clear-cancel"),
     statusPill: document.getElementById("status-pill"),
     statusPillText: document.getElementById("status-pill-text"),
     legend: null,
@@ -691,6 +718,42 @@
     lsDel(LS.watch);
     stopTicking();
     render();
+  }
+
+  // ---- clear confirmation modal ----
+  // The Clear button is the only way in, so focus always returns there on
+  // dismiss — except on confirm, where the button is about to disappear with
+  // the console, so focus goes to the schedule box instead.
+  // `inert` on the app container walls the rest of the page off from both the
+  // keyboard and a screen reader's virtual cursor while the dialog is up; the
+  // Tab handler in onModalKeydown is the fallback for browsers without inert.
+  function openClearConfirm(){
+    if (!el.clearOverlay.hidden) return;
+    el.clearOverlay.hidden = false;
+    el.app.inert = true;
+    document.addEventListener("keydown", onModalKeydown, true);
+    el.clearCancel.focus();
+  }
+  function closeClearConfirm(focusEl){
+    if (el.clearOverlay.hidden) return;
+    el.clearOverlay.hidden = true;
+    el.app.inert = false;
+    document.removeEventListener("keydown", onModalKeydown, true);
+    (focusEl || el.clearBtn).focus();
+  }
+  function confirmClear(){
+    closeClearConfirm(el.input);
+    clearAll();
+  }
+  // Trap focus between the two buttons; Esc cancels.
+  function onModalKeydown(e){
+    if (e.key === "Escape"){ e.preventDefault(); closeClearConfirm(); return; }
+    if (e.key === "Tab"){
+      var f = [el.clearCancel, el.clearConfirm];
+      var i = f.indexOf(document.activeElement);
+      e.preventDefault();
+      f[e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i >= f.length - 1 ? 0 : i + 1)].focus();
+    }
   }
 
   function loadSchedule(){
@@ -940,7 +1003,10 @@
   // ---- events ----
   el.loadBtn.addEventListener("click", loadSchedule);
   el.playBtn.addEventListener("click", toggleArmed);
-  el.clearBtn.addEventListener("click", clearAll);
+  el.clearBtn.addEventListener("click", openClearConfirm);
+  el.clearConfirm.addEventListener("click", confirmClear);
+  el.clearCancel.addEventListener("click", function(){ closeClearConfirm(); });
+  el.clearOverlay.addEventListener("click", function(e){ if (e.target === el.clearOverlay) closeClearConfirm(); });
   el.expandBtn.addEventListener("click", function(){ expanded = !expanded; render(); });
   el.leadInput.addEventListener("change", commitLead);
   // Click anywhere in the lead-time box starts editing the number.
