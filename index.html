@@ -158,13 +158,33 @@
   .tip__list li{display:flex;align-items:baseline;gap:0.45rem;font-size:0.8rem;line-height:1.3;}
   .tip__dot{flex:none;width:0.5rem;height:0.5rem;border-radius:50%;background:var(--c);align-self:center;}
 
-  .alert-banner{position:relative;}
-  .alert-banner.is-active{margin-top:1.6rem;background:var(--danger-soft);border:1px solid var(--danger);border-radius:6px;padding:0.7rem 0.9rem;}
-  .alert-banner__caret{position:absolute;top:-6px;width:10px;height:10px;background:var(--danger-soft);border-left:1px solid var(--danger);border-top:1px solid var(--danger);transform:translateX(-50%) rotate(45deg);}
-  .alert-banner__head{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;color:var(--danger);margin-bottom:0.4rem;}
+  /* Reminders stack: newest card sits right under the timeline, older ones below. */
+  .alert-stack.has-cards{margin-top:1.6rem;}
+  .alert-banner{position:relative;margin-bottom:0.7rem;background:var(--danger-soft);border:1px solid var(--danger);border-radius:6px;padding:0.7rem 0.9rem;overflow:hidden;}
+  .alert-banner:last-child{margin-bottom:0;}
+  .alert-banner__head{display:flex;align-items:center;gap:0.5rem;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;color:var(--danger);margin-bottom:0.4rem;}
   .alert-banner__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.28rem;}
   .alert-banner__list li{display:flex;align-items:baseline;gap:0.5rem;font-size:0.9rem;line-height:1.35;}
   .alert-banner__dot{flex:none;width:0.55rem;height:0.55rem;border-radius:50%;background:var(--c);align-self:center;}
+  .alert-banner__more{color:var(--ink-soft);font-size:0.82rem;font-style:italic;}
+  /* Acknowledge checkbox — sits before the heading; tick it to clear the reminder. */
+  .alert-banner__ack{flex:none;display:inline-flex;line-height:0;}
+  .alert-banner__check{appearance:none;-webkit-appearance:none;width:1rem;height:1rem;margin:0;border:1.5px solid var(--danger);border-radius:4px;background:transparent;cursor:pointer;position:relative;transition:background 0.12s ease,border-color 0.12s ease;}
+  .alert-banner__check:hover{background:color-mix(in srgb, var(--danger) 14%, transparent);}
+  .alert-banner__check:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .alert-banner__check:checked{background:var(--on-fill);border-color:var(--on-fill);}
+  .alert-banner__check:checked::after{content:"";position:absolute;left:0.3rem;top:0.1rem;width:0.24rem;height:0.5rem;border:solid var(--panel);border-width:0 2px 2px 0;transform:rotate(45deg);}
+  /* Acknowledged: flash green, then collapse and let the stack close up. */
+  @keyframes ack-clear{
+    0%{background:var(--danger-soft);border-color:var(--danger);max-height:var(--card-h);}
+    18%{background:var(--on-wash);border-color:var(--on-fill);max-height:var(--card-h);opacity:1;}
+    45%{background:var(--on-wash);border-color:var(--on-fill);max-height:var(--card-h);opacity:1;transform:none;}
+    100%{background:var(--on-wash);border-color:var(--on-fill);max-height:0;opacity:0;margin-bottom:0;padding-top:0;padding-bottom:0;border-top-width:0;border-bottom-width:0;transform:translateY(-6px);}
+  }
+  .alert-banner.is-cleared{animation:ack-clear 0.5s ease forwards;pointer-events:none;}
+  @media (prefers-reduced-motion: reduce){
+    .alert-banner.is-cleared{animation-duration:0.01s;}
+  }
 
   /* ---------- confirm overlay ---------- */
   .overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:rgba(20,22,25,0.45);}
@@ -292,7 +312,7 @@
 
     <div class="timeline-stats" id="timeline-stats" hidden></div>
 
-    <div class="alert-banner" id="alert-banner" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="alert-stack" id="alert-stack" role="status" aria-live="polite"></div>
   </section>
 
   <section class="list-section" id="list-section" hidden aria-label="Scheduled cues">
@@ -513,9 +533,9 @@
   // ---- state ----
   var entries = [], batches = [];
   var armed = false, history = [], firstPlayTs = null;
-  var alarmedBatches = new Set(), upcomingBatch = null;
+  var alarmedBatches = new Set(), acked = new Set();
   var leadMinutes = 7, theme = "auto", expanded = false, hoverBatchTs = null;
-  var notifyEnabled = false, lastBannerSig = null;
+  var notifyEnabled = false;
   var audioCtx = null, tickTimer = null;
 
   var el = {
@@ -536,7 +556,7 @@
     track: document.getElementById("timeline-track"),
     dotTip: document.getElementById("dot-tip"),
     timeline: null,
-    alertBanner: document.getElementById("alert-banner"),
+    alertStack: document.getElementById("alert-stack"),
     entryList: document.getElementById("entry-list"),
     listCount: document.getElementById("list-count"),
     expandBtn: document.getElementById("expand-btn"),
@@ -706,7 +726,8 @@
   function saveWatch(){
     lsSet(LS.watch, JSON.stringify({
       day: watchDay(), armed: armed, history: history,
-      firstPlayTs: firstPlayTs, alarmed: Array.from(alarmedBatches)
+      firstPlayTs: firstPlayTs, alarmed: Array.from(alarmedBatches),
+      acked: Array.from(acked)
     }));
   }
   function applySavedWatch(raw){
@@ -717,6 +738,7 @@
       history = Array.isArray(w.history) ? w.history : [];
       firstPlayTs = (typeof w.firstPlayTs === "number") ? w.firstPlayTs : null;
       alarmedBatches = new Set(Array.isArray(w.alarmed) ? w.alarmed : []);
+      acked = new Set(Array.isArray(w.acked) ? w.acked : []);
       // Re-persist: loadSchedule() reset the stored watch just before this runs,
       // so write the restored state back or it would be lost on the next reload.
       saveWatch();
@@ -765,7 +787,7 @@
   function clearAll(){
     entries = []; batches = [];
     armed = false; history = []; firstPlayTs = null;
-    alarmedBatches = new Set(); upcomingBatch = null;
+    alarmedBatches = new Set(); acked = new Set();
     expanded = false; hoverBatchTs = null;
     el.input.value = "";
     el.error.textContent = "";
@@ -828,7 +850,7 @@
     entries = parsed.entries;
     batches = computeBatches(entries);
     armed = false; history = []; firstPlayTs = null;
-    alarmedBatches = new Set(); upcomingBatch = null;
+    alarmedBatches = new Set(); acked = new Set();
     expanded = false; hoverBatchTs = null;
     lsSet(LS.sched, el.input.value);
     saveWatch();
@@ -852,13 +874,13 @@
       var diff = b.ts - t;
       if (armed && diff <= leadMs && diff > -60000 && !alarmedBatches.has(b.ts)){
         alarmedBatches.add(b.ts);
-        upcomingBatch = b;
         changed = true;
         playDing();
         sendNotification(b, t);
       }
     });
-    if (upcomingBatch && t - upcomingBatch.ts > 2*60000) upcomingBatch = null;
+    // The card the fire produces is reconciled from alarmedBatches in render() ->
+    // renderReminders(); it stays put until the user ticks its checkbox.
     if (changed) saveWatch();
   }
 
@@ -962,11 +984,99 @@
     el.dotTip.style.left = x + "px";
   }
 
+  // ---- reminders stack (persistent, acknowledgeable alert cards) ----
+  function reminderRel(ts, t){
+    var mins = Math.round((ts - t) / 60000);
+    if (mins > 0) return "in " + mins + " min";
+    if (mins === 0) return "now";
+    return -mins + " min ago";
+  }
+  function buildReminderCard(b){
+    var card = document.createElement("div");
+    card.className = "alert-banner";
+    card.setAttribute("data-ts", b.ts);
+    var items = b.items.slice(0, 3).map(function(it){
+      return '<li style="--c:' + it.color + '"><span class="alert-banner__dot"></span>' + escapeHtml(it.message) + '</li>';
+    }).join("");
+    var more = b.items.length > 3 ? '<li class="alert-banner__more">+' + (b.items.length - 3) + ' more</li>' : "";
+    card.innerHTML =
+      '<div class="alert-banner__head">' +
+        '<label class="alert-banner__ack"><input type="checkbox" class="alert-banner__check" aria-label="Acknowledge and clear this reminder"></label>' +
+        '<span class="alert-banner__title">Heads up — <span class="alert-banner__rel"></span></span>' +
+      '</div>' +
+      '<ul class="alert-banner__list">' + items + more + '</ul>';
+    return card;
+  }
+  function renderReminders(){
+    if (!el.alertStack) return;
+    var t = now(), desired = [], want = {};
+    batches.forEach(function(b){
+      if (alarmedBatches.has(b.ts) && !acked.has(b.ts)){ desired.push(b); want[b.ts] = b; }
+    });
+    // Ascending sort + prepend below => the newest fired card ends up on top.
+    desired.sort(function(a, b){ return a.ts - b.ts; });
+    // Drop cards that no longer belong (e.g. a fresh schedule was loaded), leaving
+    // any card mid-clear alone so its animation can finish.
+    var cards = el.alertStack.querySelectorAll(".alert-banner");
+    for (var i = 0; i < cards.length; i++){
+      var c = cards[i];
+      if (c.classList.contains("is-cleared")) continue;
+      if (!want[Number(c.getAttribute("data-ts"))] && c.parentNode) c.parentNode.removeChild(c);
+    }
+    desired.forEach(function(b){
+      var card = el.alertStack.querySelector('.alert-banner[data-ts="' + b.ts + '"]:not(.is-cleared)');
+      if (!card){
+        card = buildReminderCard(b);
+        el.alertStack.insertBefore(card, el.alertStack.firstChild);
+      } else {
+        // Reused card: re-resolve each cue dot's colour so it tracks a live theme
+        // switch. render() refreshes entries[].color (shared with b.items) first,
+        // but the card baked in the old palette's --c when it was built.
+        var lis = card.querySelectorAll(".alert-banner__list > li");
+        var shown = b.items.slice(0, 3);
+        for (var k = 0; k < shown.length && k < lis.length; k++){
+          lis[k].style.setProperty("--c", shown[k].color);
+        }
+      }
+      var rel = card.querySelector(".alert-banner__rel");
+      // Only rewrite when the text actually changes, so the 1s tick doesn't churn
+      // the DOM or make the aria-live region re-announce identical countdowns.
+      var relText = reminderRel(b.ts, t) + " · " + formatWhen(b.ts);
+      if (rel && rel.textContent !== relText) rel.textContent = relText;
+    });
+    el.alertStack.classList.toggle("has-cards", !!el.alertStack.querySelector(".alert-banner"));
+  }
+  function clearReminders(){
+    if (!el.alertStack) return;
+    el.alertStack.innerHTML = "";
+    el.alertStack.classList.remove("has-cards");
+  }
+  function ackReminder(card){
+    if (card.__ackHandled) return;
+    card.__ackHandled = true;
+    var ts = Number(card.getAttribute("data-ts"));
+    acked.add(ts);
+    saveWatch();
+    // Freeze the current height so the collapse has somewhere to animate from.
+    card.style.setProperty("--card-h", card.scrollHeight + "px");
+    void card.offsetHeight; // force reflow before the class flips
+    card.classList.add("is-cleared");
+    var done = function(){
+      if (card.__removed) return;
+      card.__removed = true;
+      card.removeEventListener("animationend", done);
+      if (card.parentNode) card.parentNode.removeChild(card);
+      renderReminders();
+    };
+    card.addEventListener("animationend", done);
+    setTimeout(done, 700); // fallback if animationend is missed
+  }
+
   function render(){
     var hasEntries = entries.length > 0;
     el.console.hidden = !hasEntries;
     el.listSection.hidden = !hasEntries;
-    if (!hasEntries){ el.dotTip.hidden = true; el.timelineStats.hidden = true; return; }
+    if (!hasEntries){ el.dotTip.hidden = true; el.timelineStats.hidden = true; clearReminders(); return; }
 
     // Resolve each cue's colour for the active theme so dots stay legible in both.
     var pal = currentPalette();
@@ -1026,36 +1136,17 @@
       '<span class="st-left"><span class="st-dot"></span><b>' + leftCount + '</b>&nbsp;left to fire</span>';
     el.timelineStats.hidden = false;
 
-    if (upcomingBatch){
-      var mins = Math.max(0, Math.round((upcomingBatch.ts - t)/60000));
-      var when = mins === 0 ? "now" : "in " + mins + " min";
-      // Only rebuild the live region when the announced content actually changes,
-      // so the 1s render loop doesn't re-announce identical text every tick.
-      var sig = upcomingBatch.ts + "|" + when;
-      if (sig !== lastBannerSig){
-        lastBannerSig = sig;
-        var items = upcomingBatch.items.slice(0,3).map(function(it){
-          return '<li style="--c:' + it.color + '"><span class="alert-banner__dot"></span>' + escapeHtml(it.message) + '</li>';
-        }).join("");
-        el.alertBanner.innerHTML =
-          '<span class="alert-banner__caret" style="left:' + pct(t, range) + '%"></span>' +
-          '<div class="alert-banner__head">Heads up — ' + when + ' · ' + formatWhen(upcomingBatch.ts) + '</div>' +
-          '<ul class="alert-banner__list">' + items + '</ul>';
-        el.alertBanner.classList.add("is-active");
-      } else {
-        var caret = el.alertBanner.querySelector(".alert-banner__caret");
-        if (caret) caret.style.left = pct(t, range) + "%"; // reposition only, no re-announce
-      }
-    } else if (lastBannerSig !== null){
-      lastBannerSig = null;
-      el.alertBanner.classList.remove("is-active");
-      el.alertBanner.innerHTML = "";
-    }
-
+    renderReminders();
     renderTip();
   }
 
   // ---- events ----
+  el.alertStack.addEventListener("change", function(e){
+    var cb = e.target;
+    if (!cb.classList || !cb.classList.contains("alert-banner__check") || !cb.checked) return;
+    var card = cb.closest(".alert-banner");
+    if (card) ackReminder(card);
+  });
   el.loadBtn.addEventListener("click", loadSchedule);
   el.playBtn.addEventListener("click", toggleArmed);
   el.clearBtn.addEventListener("click", openClearConfirm);
@@ -1108,7 +1199,7 @@
   window.__debug = { getState: function(){ return {
     entries: entries, batches: batches, armed: armed, history: history,
     firstPlayTs: firstPlayTs, alarmedBatches: Array.from(alarmedBatches),
-    upcomingBatch: upcomingBatch, leadMinutes: leadMinutes, theme: theme, expanded: expanded, notifyEnabled: notifyEnabled
+    acked: Array.from(acked), leadMinutes: leadMinutes, theme: theme, expanded: expanded, notifyEnabled: notifyEnabled
   }; } };
 
   loadSettings();
